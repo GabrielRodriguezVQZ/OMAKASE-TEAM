@@ -4,12 +4,53 @@ import { connectSocket, disconnectSocket, joinSurgery, leaveSurgery } from '../s
 import { surgeriesApi, alertsApi } from '../services/api';
 import { Surgery, SurgeryStatus, ChecklistMoment, SurgeryEvent, CompletionVia, Alert } from '../types';
 import AlertsPanel from '../components/AlertsPanel';
+import { useVoiceCommands, useSpeechSynthesis } from '../hooks/useVoiceCommands';
 
 const Quirofano: React.FC = () => {
   const { user, logout } = useAuth();
   const [currentSurgery, setCurrentSurgery] = useState<Surgery | null>(null);
   const [loading, setLoading] = useState(true);
   const [alerts, setAlerts] = useState<Alert[]>([]);
+  const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const { speak } = useSpeechSynthesis();
+
+  // Comandos de voz
+  const voiceCommands = [
+    {
+      command: 'confirmar identificación',
+      action: () => handleVoiceChecklist('identificación'),
+    },
+    {
+      command: 'confirmar alergias',
+      action: () => handleVoiceChecklist('alergias'),
+    },
+    {
+      command: 'confirmar sitio quirúrgico',
+      action: () => handleVoiceChecklist('sitio quirúrgico'),
+    },
+    {
+      command: 'inicio de anestesia',
+      action: () => handleVoiceTime('INICIO_ANESTESIA'),
+    },
+    {
+      command: 'inicio de cirugía',
+      action: () => handleVoiceTime('INICIO_CIRUGIA'),
+    },
+    {
+      command: 'fin de cirugía',
+      action: () => handleVoiceTime('FIN_CIRUGIA'),
+    },
+    {
+      command: 'confirmar',
+      action: () => confirmPendingAction(),
+    },
+    {
+      command: 'cancelar',
+      action: () => cancelPendingAction(),
+    },
+  ];
+
+  const { isListening, startListening, stopListening, lastCommand } = useVoiceCommands(voiceCommands);
 
   useEffect(() => {
     connectSocket(localStorage.getItem('token') || '');
@@ -122,6 +163,33 @@ const Quirofano: React.FC = () => {
     }
   };
 
+  const handleVoiceChecklist = (itemText: string) => {
+    if (!currentSurgery) return;
+    const item = currentSurgery.checklist?.find((i) => i.item.toLowerCase().includes(itemText));
+    if (item) {
+      setPendingAction(`Marcar "${item.item}" como completado`);
+      speak(`¿Desea marcar ${item.item} como completado? Diga confirmar o cancelar`);
+    }
+  };
+
+  const handleVoiceTime = (evento: SurgeryEvent) => {
+    if (!currentSurgery) return;
+    setPendingAction(`Registrar evento: ${evento}`);
+    speak(`¿Desea registrar ${evento}? Diga confirmar o cancelar`);
+  };
+
+  const confirmPendingAction = async () => {
+    if (!pendingAction || !currentSurgery) return;
+    // Implementar la acción pendiente
+    setPendingAction(null);
+    speak('Acción confirmada');
+  };
+
+  const cancelPendingAction = () => {
+    setPendingAction(null);
+    speak('Acción cancelada');
+  };
+
   const handleChecklistItem = async (itemId: string, completado: boolean) => {
     if (!currentSurgery) return;
     try {
@@ -216,6 +284,32 @@ const Quirofano: React.FC = () => {
           </div>
         ) : (
           <div className="space-y-6">
+            {/* Indicador de voz */}
+            <div className="bg-white p-4 rounded-lg shadow flex items-center justify-between">
+              <div className="flex items-center gap-4">
+                <div className={`w-4 h-4 rounded-full ${isListening ? 'bg-red-600 animate-pulse' : 'bg-gray-400'}`}></div>
+                <span className="text-lg font-medium">
+                  {isListening ? 'Escuchando...' : 'Voz inactiva'}
+                </span>
+                {lastCommand && <span className="text-sm text-gray-600">Último: "{lastCommand}"</span>}
+              </div>
+              <button
+                onClick={isListening ? stopListening : startListening}
+                className={`px-6 py-3 rounded-lg text-white font-medium ${
+                  isListening ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'
+                }`}
+              >
+                {isListening ? 'Detener Voz' : 'Activar Voz'}
+              </button>
+            </div>
+
+            {pendingAction && (
+              <div className="bg-yellow-100 border-l-4 border-yellow-500 p-4 rounded">
+                <p className="font-medium text-yellow-800">{pendingAction}</p>
+                <p className="text-sm text-yellow-700">Diga "confirmar" o "cancelar"</p>
+              </div>
+            )}
+
             <AlertsPanel alerts={alerts} onResolve={handleResolveAlert} userId={user?.id} />
 
             {/* Información del paciente */}
