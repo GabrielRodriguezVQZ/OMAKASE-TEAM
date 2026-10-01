@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { connectSocket, disconnectSocket, joinSurgery, leaveSurgery } from '../services/socket';
-import { surgeriesApi, patientsApi } from '../services/api';
-import { Surgery, Patient, SurgeryStatus, SurgicalRole } from '../types';
+import { surgeriesApi, patientsApi, alertsApi } from '../services/api';
+import { Surgery, Patient, SurgeryStatus, SurgicalRole, Alert, AlertSeverity } from '../types';
 
 const Enfermeria: React.FC = () => {
   const { user, logout } = useAuth();
@@ -10,6 +10,7 @@ const Enfermeria: React.FC = () => {
   const [selectedSurgery, setSelectedSurgery] = useState<Surgery | null>(null);
   const [showNewForm, setShowNewForm] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [alerts, setAlerts] = useState<Alert[]>([]);
 
   // Form state
   const [patientData, setPatientData] = useState({
@@ -47,6 +48,8 @@ const Enfermeria: React.FC = () => {
       socket.on('checklist:actualizado', handleChecklistActualizado);
       socket.on('tiempo:registrado', handleTiempoRegistrado);
       socket.on('surgery:estado', handleSurgeryEstado);
+      socket.on('alerta:nueva', handleAlertaNueva);
+      socket.on('alerta:resuelta', handleAlertaResuelta);
     }
 
     return () => {
@@ -92,12 +95,36 @@ const Enfermeria: React.FC = () => {
     }
   };
 
+  const handleAlertaNueva = (data: any) => {
+    console.log('Alerta nueva:', data);
+    if (selectedSurgery?.id === data.surgeryId) {
+      loadAlerts(selectedSurgery.id);
+    }
+  };
+
+  const handleAlertaResuelta = (data: any) => {
+    console.log('Alerta resuelta:', data);
+    if (selectedSurgery?.id === data.surgeryId) {
+      loadAlerts(selectedSurgery.id);
+    }
+  };
+
   const loadSurgeryDetails = async (surgeryId: string) => {
     try {
       const response = await surgeriesApi.getById(surgeryId);
       setSelectedSurgery(response.data);
+      loadAlerts(surgeryId);
     } catch (error) {
       console.error('Error loading surgery details:', error);
+    }
+  };
+
+  const loadAlerts = async (surgeryId: string) => {
+    try {
+      const response = await alertsApi.getBySurgery(surgeryId);
+      setAlerts(response.data);
+    } catch (error) {
+      console.error('Error loading alerts:', error);
     }
   };
 

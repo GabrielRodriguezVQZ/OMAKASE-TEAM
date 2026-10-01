@@ -26,12 +26,36 @@ export enum CompletionVia {
   VOZ = 'VOZ',
 }
 
+export enum AlertSeverity {
+  INFO = 'INFO',
+  WARNING = 'WARNING',
+  ERROR = 'ERROR',
+  CRITICAL = 'CRITICAL',
+}
+
+export enum AlertStatus {
+  ABIERTA = 'ABIERTA',
+  RESUELTA = 'RESUELTA',
+}
+
 export enum SurgeryEvent {
   INGRESO_PACIENTE = 'INGRESO_PACIENTE',
   INICIO_ANESTESIA = 'INICIO_ANESTESIA',
   INICIO_CIRUGIA = 'INICIO_CIRUGIA',
   FIN_CIRUGIA = 'FIN_CIRUGIA',
   SALIDA_RECUPERACION = 'SALIDA_RECUPERACION',
+}
+
+export interface Alert {
+  id: string;
+  surgery_id: string;
+  tipo: string;
+  mensaje: string;
+  severidad: AlertSeverity;
+  estado: AlertStatus;
+  creada_en: string;
+  resuelta_por?: string;
+  resuelta_en?: string;
 }
 
 export interface Patient {
