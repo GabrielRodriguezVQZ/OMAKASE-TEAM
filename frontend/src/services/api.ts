@@ -34,4 +34,29 @@ export const authApi = {
     api.post('/auth/login', { email, password }),
 };
 
+export const patientsApi = {
+  getAll: () => api.get('/patients'),
+  getById: (id: string) => api.get(`/patients/${id}`),
+  create: (data: any) => api.post('/patients', data),
+  update: (id: string, data: any) => api.put(`/patients/${id}`, data),
+  delete: (id: string) => api.delete(`/patients/${id}`),
+};
+
+export const surgeriesApi = {
+  getAll: () => api.get('/surgeries'),
+  getById: (id: string) => api.get(`/surgeries/${id}`),
+  create: (data: any) => api.post('/surgeries', data),
+  update: (id: string, data: any) => api.put(`/surgeries/${id}`, data),
+  delete: (id: string) => api.delete(`/surgeries/${id}`),
+  addTeamMember: (id: string, data: any) => api.post(`/surgeries/${id}/team`, data),
+  updateTeamMember: (id: string, teamId: string, data: any) =>
+    api.put(`/surgeries/${id}/team/${teamId}`, data),
+  getChecklist: (id: string) => api.get(`/surgeries/${id}/checklist`),
+  updateChecklistItem: (id: string, itemId: string, data: any) =>
+    api.put(`/surgeries/${id}/checklist/${itemId}`, data),
+  registerTime: (id: string, data: any) => api.post(`/surgeries/${id}/times`, data),
+  getTimes: (id: string) => api.get(`/surgeries/${id}/times`),
+  sendToQuirfano: (id: string) => api.post(`/surgeries/${id}/enviar-quirfano`),
+};
+
 export default api;
