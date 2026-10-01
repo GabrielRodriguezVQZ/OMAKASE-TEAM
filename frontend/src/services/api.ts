@@ -66,4 +66,13 @@ export const alertsApi = {
   resolve: (alertId: string, userId: string) => api.post(`/alerts/${alertId}/resolve`, { userId }),
 };
 
+export const dashboardApi = {
+  getResumen: () => api.get('/dashboard/resumen'),
+};
+
+export const analyticsApi = {
+  duracionEstimada: (procedimiento: string) => api.post('http://localhost:8001/analytics/duracion-estimada', { procedimiento }),
+  omisionesFrecuentes: () => api.get('http://localhost:8001/analytics/omisiones-frecuentes'),
+};
+
 export default api;
