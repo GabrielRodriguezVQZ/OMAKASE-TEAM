@@ -4,12 +4,13 @@ import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { AppModule } from './app.module';
 import { DataSource } from 'typeorm';
 import { seed } from './database/seed';
+import { seedHistoricalData } from './database/seed-historical';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
   app.enableCors({
-    origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+    origin: process.env.FRONTEND_URL || 'http://localhost:5174',
     credentials: true,
   });
 
@@ -32,6 +33,14 @@ async function bootstrap() {
 
   const dataSource = app.get(DataSource);
   await seed(dataSource);
+  
+  // Seed de datos históricos (solo si no existen cirugías anteriores)
+  const surgeryRepo = dataSource.getRepository('Surgery');
+  const existingSurgeries = await surgeryRepo.count();
+  if (existingSurgeries <= 3) { // Solo si hay pocos datos (los del seed básico)
+    console.log('Generando datos históricos...');
+    await seedHistoricalData(dataSource);
+  }
 
   const port = process.env.PORT || 3000;
   await app.listen(port);

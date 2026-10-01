@@ -17,6 +17,7 @@ export const useVoiceCommands = (commands: VoiceCommand[]): UseVoiceCommandsRetu
   const [isListening, setIsListening] = useState(false);
   const [lastCommand, setLastCommand] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [shouldKeepListening, setShouldKeepListening] = useState(false);
 
   useEffect(() => {
     if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
@@ -28,11 +29,11 @@ export const useVoiceCommands = (commands: VoiceCommand[]): UseVoiceCommandsRetu
     const recognition = new SpeechRecognition();
     
     recognition.lang = 'es-ES';
-    recognition.continuous = false;
+    recognition.continuous = true;
     recognition.interimResults = false;
 
     recognition.onresult = (event: any) => {
-      const transcript = event.results[0][0].transcript.toLowerCase();
+      const transcript = event.results[event.results.length - 1][0].transcript.toLowerCase();
       console.log('Comando reconocido:', transcript);
       
       // Buscar comando que coincida
@@ -51,11 +52,26 @@ export const useVoiceCommands = (commands: VoiceCommand[]): UseVoiceCommandsRetu
     recognition.onerror = (event: any) => {
       console.error('Error de reconocimiento de voz:', event.error);
       setError(event.error);
-      setIsListening(false);
+      if (event.error === 'not-allowed') {
+        setIsListening(false);
+        setShouldKeepListening(false);
+      }
     };
 
     recognition.onend = () => {
+      console.log('Reconocimiento terminado');
       setIsListening(false);
+      
+      // Reiniciar automáticamente si se debe mantener escuchando
+      if (shouldKeepListening) {
+        try {
+          recognition.start();
+          setIsListening(true);
+        } catch (e) {
+          console.error('Error al reiniciar reconocimiento:', e);
+          setShouldKeepListening(false);
+        }
+      }
     };
 
     // Guardar la instancia de recognition
@@ -64,7 +80,7 @@ export const useVoiceCommands = (commands: VoiceCommand[]): UseVoiceCommandsRetu
     return () => {
       recognition.abort();
     };
-  }, [commands]);
+  }, [commands, shouldKeepListening]);
 
   const startListening = useCallback(() => {
     const recognition = (window as any).speechRecognitionInstance;
@@ -72,6 +88,7 @@ export const useVoiceCommands = (commands: VoiceCommand[]): UseVoiceCommandsRetu
       try {
         recognition.start();
         setIsListening(true);
+        setShouldKeepListening(true);
         setError(null);
       } catch (e) {
         console.error('Error al iniciar reconocimiento:', e);
@@ -84,6 +101,7 @@ export const useVoiceCommands = (commands: VoiceCommand[]): UseVoiceCommandsRetu
     if (recognition) {
       recognition.stop();
       setIsListening(false);
+      setShouldKeepListening(false);
     }
   }, []);
 
