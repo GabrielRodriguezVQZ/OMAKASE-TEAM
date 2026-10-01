@@ -46,7 +46,7 @@ const Gestion: React.FC = () => {
 
   const loadOmisiones = async () => {
     try {
-      const response = await analyticsApi.omisionesFrecuentes();
+      const response = await dashboardApi.getOmisionesFrecuentes();
       setOmisiones(response.data.omisiones);
     } catch (error) {
       console.error('Error loading omisiones:', error);

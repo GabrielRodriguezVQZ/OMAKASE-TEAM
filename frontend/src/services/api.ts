@@ -68,11 +68,8 @@ export const alertsApi = {
 
 export const dashboardApi = {
   getResumen: () => api.get('/dashboard/resumen'),
-};
-
-export const analyticsApi = {
-  duracionEstimada: (procedimiento: string) => api.post('http://localhost:8001/analytics/duracion-estimada', { procedimiento }),
-  omisionesFrecuentes: () => api.get('http://localhost:8001/analytics/omisiones-frecuentes'),
+  getDuracionEstimada: (procedimiento: string) => api.post('/dashboard/analytics/duracion-estimada', { procedimiento }),
+  getOmisionesFrecuentes: () => api.get('/dashboard/analytics/omisiones-frecuentes'),
 };
 
 export default api;
