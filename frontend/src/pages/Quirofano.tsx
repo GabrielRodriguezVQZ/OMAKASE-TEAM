@@ -54,6 +54,36 @@ const Quirofano: React.FC = () => {
       invalidMessage: 'Ese comando no aplica en esta fase',
     },
     {
+      command: 'confirmar paciente',
+      action: () => handleVoiceChecklist('paciente'),
+      validate: () => flujo?.currentPhase === 3,
+      invalidMessage: 'Ese comando no aplica en esta fase',
+    },
+    {
+      command: 'confirmar procedimiento',
+      action: () => handleVoiceChecklist('procedimiento'),
+      validate: () => flujo?.currentPhase === 2 || flujo?.currentPhase === 3,
+      invalidMessage: 'Ese comando no aplica en esta fase',
+    },
+    {
+      command: 'confirmar equipo',
+      action: () => handleVoiceChecklist('equipo'),
+      validate: () => flujo?.currentPhase === 3,
+      invalidMessage: 'Ese comando no aplica en esta fase',
+    },
+    {
+      command: 'confirmar antibiótico',
+      action: () => handleVoiceChecklist('antibiótico'),
+      validate: () => flujo?.currentPhase === 3,
+      invalidMessage: 'Ese comando no aplica en esta fase',
+    },
+    {
+      command: 'confirmar riesgos',
+      action: () => handleVoiceChecklist('riesgos'),
+      validate: () => flujo?.currentPhase === 2 || flujo?.currentPhase === 3,
+      invalidMessage: 'Ese comando no aplica en esta fase',
+    },
+    {
       command: 'siguiente',
       action: () => handleVoiceRegister(),
       validate: () => flujo?.currentPhase >= 1 && flujo?.currentPhase <= 4,
@@ -81,7 +111,8 @@ const Quirofano: React.FC = () => {
     },
   ];
 
-  const { isListening, startListening, stopListening, lastCommand } = useVoiceCommands(voiceCommands);
+  const { isListening, isSupported, startListening, stopListening, lastCommand, error: voiceError } =
+    useVoiceCommands(voiceCommands);
 
   const loadSurgery = async () => {
     try {
@@ -125,6 +156,16 @@ const Quirofano: React.FC = () => {
     setLoading(false);
 
     const socket = connectSocket();
+    console.log('Socket conectado:', socket);
+    
+    socket.on('connect', () => {
+      console.log('Socket conectado al servidor');
+    });
+    
+    socket.on('disconnect', () => {
+      console.log('Socket desconectado del servidor');
+    });
+
     socket.on('surgery:enviada', handleSurgeryEnviada);
     socket.on('checklist:actualizado', handleChecklistActualizado);
     socket.on('tiempo:registrado', handleTiempoRegistrado);
@@ -138,6 +179,7 @@ const Quirofano: React.FC = () => {
   }, []);
 
   const handleSurgeryEnviada = (data: any) => {
+    console.log('Evento surgery:enviada recibido:', data);
     localStorage.setItem('currentSurgeryId', data.surgeryId);
     loadSurgery();
   };
@@ -155,8 +197,10 @@ const Quirofano: React.FC = () => {
   };
 
   const handleFlujoActualizado = (data: any) => {
+    console.log('Flujo actualizado:', data);
     if (currentSurgery && data.surgeryId === currentSurgery.id) {
       setFlujo(data);
+      loadSurgery(); // Recargar la cirugía para actualizar estado completo
     }
   };
 
@@ -173,19 +217,27 @@ const Quirofano: React.FC = () => {
   };
 
   const handleChecklistItem = async (itemId: string, completado: boolean) => {
+    console.log('=== handleChecklistItem ===');
+    console.log('Item ID:', itemId);
+    console.log('Completado:', completado);
+    console.log('Via:', CompletionVia.MANUAL);
+    
     if (!currentSurgery) return;
     try {
+      console.log('Enviando petición al backend...');
       await surgeriesApi.updateChecklistItem(currentSurgery.id, itemId, {
         completado,
         completado_por: user?.id,
         completado_en: new Date().toISOString(),
         via: CompletionVia.MANUAL,
       });
+      console.log('Petición exitosa');
       setSuccess('Item del checklist actualizado');
       setTimeout(() => setSuccess(null), 3000);
       loadSurgery();
     } catch (error: any) {
       console.error('Error updating checklist:', error);
+      console.error('Error response:', error.response?.data);
       setError(error.response?.data?.message || 'Error al actualizar checklist');
       setTimeout(() => setError(null), 5000);
     }
@@ -228,12 +280,17 @@ const Quirofano: React.FC = () => {
     if (!flujo) return;
     
     const phaseChecklist = getPhaseChecklist(flujo.currentPhase);
-    const item = phaseChecklist.find((i) => i.item.toLowerCase().includes(itemText));
+    // Buscar item que contenga el texto (case insensitive)
+    const item = phaseChecklist.find((i) => 
+      i.item.toLowerCase().includes(itemText.toLowerCase()) ||
+      itemText.toLowerCase().includes(i.item.toLowerCase().split(' ')[0]) // Buscar por primera palabra
+    );
     
     if (item) {
       handleChecklistItem(item.id, !item.completado);
     } else {
       speak('Item no encontrado en esta fase');
+      console.log('Items disponibles:', phaseChecklist.map(i => i.item));
     }
   };
 
@@ -427,7 +484,7 @@ const Quirofano: React.FC = () => {
             )}
 
             {/* Indicador de voz */}
-            <div className="bg-white p-4 rounded-lg shadow flex items-center justify-between">
+            <div className="bg-white p-4 rounded-lg shadow flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center gap-4">
                 <div className={`w-4 h-4 rounded-full ${isListening ? 'bg-red-600 animate-pulse' : 'bg-gray-400'}`}></div>
                 <span className="text-lg font-medium">
@@ -437,12 +494,16 @@ const Quirofano: React.FC = () => {
               </div>
               <button
                 onClick={isListening ? stopListening : startListening}
-                className={`px-6 py-3 rounded-lg text-white font-medium ${
+                disabled={!isSupported}
+                className={`px-6 py-3 rounded-lg text-white font-medium disabled:opacity-50 disabled:cursor-not-allowed ${
                   isListening ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'
                 }`}
               >
                 {isListening ? 'Detener Voz' : 'Activar Voz'}
               </button>
+              {voiceError && (
+                <p className="text-sm text-amber-700">{voiceError}</p>
+              )}
             </div>
 
             {pendingAction && !showJustification && (
@@ -561,8 +622,8 @@ const Phase2: React.FC<{ flujo: FlujoResponse; onChecklist: (id: string, v: bool
   <div>
     <h2 className="text-3xl font-bold mb-6">Fase 2: Inicio de Anestesia</h2>
     <div className="space-y-2 mb-6">
-      {flujo.checklistStatus.antesAnestesia.items.map((item) => (
-        <div key={item.id} className="flex items-center gap-4 p-3 border rounded">
+      {flujo.checklistStatus.antesAnestesia.items.map((item, index) => (
+        <div key={index} className="flex items-center gap-4 p-3 border rounded">
           <input
             type="checkbox"
             checked={item.completado}
@@ -596,8 +657,8 @@ const Phase3: React.FC<{ flujo: FlujoResponse; onChecklist: (id: string, v: bool
       </div>
     )}
     <div className="space-y-2 mb-6">
-      {flujo.checklistStatus.antesIncision.items.map((item) => (
-        <div key={item.id} className="flex items-center gap-4 p-3 border rounded">
+      {flujo.checklistStatus.antesIncision.items.map((item, index) => (
+        <div key={index} className="flex items-center gap-4 p-3 border rounded">
           <input
             type="checkbox"
             checked={item.completado}
@@ -626,8 +687,8 @@ const Phase4: React.FC<{ flujo: FlujoResponse; onChecklist: (id: string, v: bool
   <div>
     <h2 className="text-3xl font-bold mb-6">Fase 4: Fin de Cirugía</h2>
     <div className="space-y-2 mb-6">
-      {flujo.checklistStatus.antesSalir.items.map((item) => (
-        <div key={item.id} className="flex items-center gap-4 p-3 border rounded">
+      {flujo.checklistStatus.antesSalir.items.map((item, index) => (
+        <div key={index} className="flex items-center gap-4 p-3 border rounded">
           <input
             type="checkbox"
             checked={item.completado}

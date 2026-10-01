@@ -139,13 +139,16 @@ export class SurgeriesService {
       item: updated,
     });
     
-    // Validar y generar alertas
-    await this.alertsService.validateSurgeryData(surgeryId);
+    // NOTA: No validamos alertas al marcar items del checklist para evitar spam de alertas
+    // Las alertas se generan solo al crear la cirugía y al registrar tiempos
     
     return this.getChecklist(surgeryId);
   }
 
   async registerTime(surgeryId: string, timeDto: any) {
+    console.log('registerTime - surgeryId:', surgeryId);
+    console.log('registerTime - timeDto:', timeDto);
+    
     const surgery = await this.surgeriesRepository.findOne({
       where: { id: surgeryId },
       relations: ['checklist', 'times'],
@@ -154,6 +157,8 @@ export class SurgeriesService {
     if (!surgery) {
       throw new NotFoundException('Cirugía no encontrada');
     }
+
+    console.log('registerTime - surgery times:', surgery.times);
 
     // Definir orden de eventos
     const eventOrder = [
@@ -168,9 +173,15 @@ export class SurgeriesService {
     const registeredEvents = surgery.times || [];
     const eventIndex = eventOrder.indexOf(timeDto.evento);
     
+    console.log('registerTime - registeredEvents:', registeredEvents);
+    console.log('registerTime - eventIndex:', eventIndex);
+    
     if (registeredEvents.length > 0) {
       const lastEvent = registeredEvents[registeredEvents.length - 1].evento;
       const lastEventIndex = eventOrder.indexOf(lastEvent);
+      
+      console.log('registerTime - lastEvent:', lastEvent);
+      console.log('registerTime - lastEventIndex:', lastEventIndex);
       
       if (eventIndex !== lastEventIndex + 1) {
         throw new Error(
@@ -236,8 +247,8 @@ export class SurgeriesService {
     }
 
     if (newStatus !== surgery.estado) {
-      this.surgeriesRepository.merge(surgery, { estado: newStatus });
-      await this.surgeriesRepository.save(surgery);
+      await this.surgeriesRepository.update(surgeryId, { estado: newStatus });
+      surgery.estado = newStatus; // Actualizar el objeto local
       
       // Emitir evento de cambio de estado
       this.gateway.server.emit('surgery:estado', {
@@ -307,16 +318,17 @@ export class SurgeriesService {
       if (currentPhase > 5) currentPhase = 5; // Máximo fase 5
     }
 
-    // Obtener checklist por momento
-    const checklistAntesAnestesia = surgery.checklist?.filter(
-      (item) => item.momento === ChecklistMoment.ANTES_ANESTESIA
-    ) || [];
-    const checklistAntesIncision = surgery.checklist?.filter(
-      (item) => item.momento === ChecklistMoment.ANTES_INCISION
-    ) || [];
-    const checklistAntesSalir = surgery.checklist?.filter(
-      (item) => item.momento === ChecklistMoment.ANTES_SALIR
-    ) || [];
+    // Obtener checklist por momento con orden explícito
+    const allChecklist = surgery.checklist || [];
+    const checklistAntesAnestesia = allChecklist
+      .filter((item) => item.momento === ChecklistMoment.ANTES_ANESTESIA)
+      .sort((a, b) => a.item.localeCompare(b.item));
+    const checklistAntesIncision = allChecklist
+      .filter((item) => item.momento === ChecklistMoment.ANTES_INCISION)
+      .sort((a, b) => a.item.localeCompare(b.item));
+    const checklistAntesSalir = allChecklist
+      .filter((item) => item.momento === ChecklistMoment.ANTES_SALIR)
+      .sort((a, b) => a.item.localeCompare(b.item));
 
     // Calcular estado de cada checklist
     const checklistStatus = {

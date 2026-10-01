@@ -151,21 +151,26 @@ const Enfermeria: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
+      console.log('Creando paciente con datos:', patientData);
       // Crear paciente
       const patientResponse = await patientsApi.create(patientData);
       const patient = patientResponse.data;
+      console.log('Paciente creado:', patient);
 
       // Crear cirugía
-      const surgeryResponse = await surgeriesApi.create({
+      const surgeryPayload = {
         patient_id: patient.id,
         procedimiento: surgeryData.procedimiento,
         sitio_quirurgico: surgeryData.sitio_quirurgico,
         quirofano: surgeryData.quirofano,
         fecha_programada: new Date(surgeryData.fecha_programada).toISOString(),
         creada_por: user?.id,
-      });
-
+      };
+      console.log('Creando cirugía con payload:', surgeryPayload);
+      
+      const surgeryResponse = await surgeriesApi.create(surgeryPayload);
       const surgery = surgeryResponse.data;
+      console.log('Cirugía creada:', surgery);
 
       // Agregar equipo
       for (const member of teamData) {
@@ -177,20 +182,28 @@ const Enfermeria: React.FC = () => {
       setShowNewForm(false);
       loadSurgeries();
       alert('Caso creado exitosamente');
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error creating case:', error);
-      alert('Error al crear el caso');
+      console.error('Error response:', error.response?.data);
+      alert(`Error al crear el caso: ${error.response?.data?.message || error.message || 'Error desconocido'}`);
     }
   };
 
   const handleSendToQuirfano = async (surgeryId: string) => {
     try {
+      console.log('Enviando a quirófano:', surgeryId);
+      console.log('Usuario actual:', user);
+      console.log('Rol del usuario:', user?.rol);
+      console.log('Token:', localStorage.getItem('token') ? 'exists' : 'missing');
+      
       await surgeriesApi.sendToQuirfano(surgeryId);
       alert('Caso enviado a quirófano');
       loadSurgeries();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error sending to quirfano:', error);
-      alert('Error al enviar a quirófano');
+      console.error('Error response:', error.response?.data);
+      console.error('Error status:', error.response?.status);
+      alert(`Error al enviar a quirófano: ${error.response?.data?.message || error.message || 'Error desconocido'}`);
     }
   };
 
@@ -340,6 +353,8 @@ const Enfermeria: React.FC = () => {
                     onChange={(e) => setPatientData({ ...patientData, edad: e.target.value })}
                     className="border p-2 rounded"
                     required
+                    min="0"
+                    max="150"
                   />
                   <input
                     type="number"
