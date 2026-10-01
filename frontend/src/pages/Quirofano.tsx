@@ -6,39 +6,70 @@ import { Surgery, SurgeryStatus, ChecklistMoment, SurgeryEvent, CompletionVia, A
 import AlertsPanel from '../components/AlertsPanel';
 import { useVoiceCommands, useSpeechSynthesis } from '../hooks/useVoiceCommands';
 
+interface FlujoResponse {
+  surgeryId: string;
+  estado: string;
+  currentPhase: number;
+  events: any[];
+  checklistStatus: {
+    antesAnestesia: { items: any[]; completado: boolean; pendientes: any[] };
+    antesIncision: { items: any[]; completado: boolean; pendientes: any[] };
+    antesSalir: { items: any[]; completado: boolean; pendientes: any[] };
+  };
+}
+
 const Quirofano: React.FC = () => {
   const { user, logout } = useAuth();
   const [currentSurgery, setCurrentSurgery] = useState<Surgery | null>(null);
   const [loading, setLoading] = useState(true);
   const [alerts, setAlerts] = useState<Alert[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [flujo, setFlujo] = useState<FlujoResponse | null>(null);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [justification, setJustification] = useState('');
+  const [showJustification, setShowJustification] = useState(false);
+  const [cronometro, setCronometro] = useState(0);
   const { speak } = useSpeechSynthesis();
 
-  // Comandos de voz
+  // Comandos de voz adaptados a fases
   const voiceCommands = [
     {
       command: 'confirmar identificación',
       action: () => handleVoiceChecklist('identificación'),
+      validate: () => flujo?.currentPhase === 2 || flujo?.currentPhase === 3,
+      invalidMessage: 'Ese comando no aplica en esta fase',
     },
     {
       command: 'confirmar alergias',
       action: () => handleVoiceChecklist('alergias'),
+      validate: () => flujo?.currentPhase === 2,
+      invalidMessage: 'Ese comando no aplica en esta fase',
     },
     {
       command: 'confirmar sitio quirúrgico',
       action: () => handleVoiceChecklist('sitio quirúrgico'),
+      validate: () => flujo?.currentPhase === 2 || flujo?.currentPhase === 3,
+      invalidMessage: 'Ese comando no aplica en esta fase',
     },
     {
-      command: 'inicio de anestesia',
-      action: () => handleVoiceTime('INICIO_ANESTESIA'),
+      command: 'siguiente',
+      action: () => handleVoiceRegister(),
+      validate: () => flujo?.currentPhase >= 1 && flujo?.currentPhase <= 4,
+      invalidMessage: 'No hay evento para registrar en esta fase',
     },
     {
-      command: 'inicio de cirugía',
-      action: () => handleVoiceTime('INICIO_CIRUGIA'),
+      command: 'registrar',
+      action: () => handleVoiceRegister(),
+      validate: () => flujo?.currentPhase >= 1 && flujo?.currentPhase <= 4,
+      invalidMessage: 'No hay evento para registrar en esta fase',
     },
     {
-      command: 'fin de cirugía',
-      action: () => handleVoiceTime('FIN_CIRUGIA'),
+      command: 'repetir',
+      action: () => handleVoiceRepeat(),
+      validate: () => flujo?.currentPhase >= 2 && flujo?.currentPhase <= 4,
+      invalidMessage: 'No hay checklist en esta fase',
     },
     {
       command: 'confirmar',
@@ -52,142 +83,93 @@ const Quirofano: React.FC = () => {
 
   const { isListening, startListening, stopListening, lastCommand } = useVoiceCommands(voiceCommands);
 
-  useEffect(() => {
-    connectSocket(localStorage.getItem('token') || '');
+  const loadSurgery = async () => {
+    try {
+      const surgeryId = localStorage.getItem('currentSurgeryId');
+      if (!surgeryId) {
+        setCurrentSurgery(null);
+        setLoading(false);
+        return;
+      }
 
-    const socket = (window as any).socket;
-    if (socket) {
-      socket.on('surgery:enviada', handleSurgeryEnviada);
-      socket.on('checklist:actualizado', handleChecklistActualizado);
-      socket.on('tiempo:registrado', handleTiempoRegistrado);
-      socket.on('surgery:estado', handleSurgeryEstado);
-      socket.on('alerta:nueva', handleAlertaNueva);
-      socket.on('alerta:resuelta', handleAlertaResuelta);
+      const surgeryData = await surgeriesApi.getById(surgeryId);
+      setCurrentSurgery(surgeryData.data);
+      loadFlujo(surgeryId);
+      loadAlerts(surgeryId);
+    } catch (error) {
+      console.error('Error loading surgery:', error);
+      setLoading(false);
     }
+  };
 
-    // Buscar cirugía en quirófano
-    loadCurrentSurgery();
+  const loadFlujo = async (surgeryId: string) => {
+    try {
+      const flujoData = await surgeriesApi.getFlujo(surgeryId);
+      setFlujo(flujoData.data);
+    } catch (error) {
+      console.error('Error loading flujo:', error);
+    }
+  };
+
+  const loadAlerts = async (surgeryId: string) => {
+    try {
+      const alertsData = await alertsApi.getBySurgery(surgeryId);
+      setAlerts(alertsData.data);
+    } catch (error) {
+      console.error('Error loading alerts:', error);
+    }
+  };
+
+  useEffect(() => {
+    loadSurgery();
+    setLoading(false);
+
+    const socket = connectSocket();
+    socket.on('surgery:enviada', handleSurgeryEnviada);
+    socket.on('checklist:actualizado', handleChecklistActualizado);
+    socket.on('tiempo:registrado', handleTiempoRegistrado);
+    socket.on('flujo:actualizado', handleFlujoActualizado);
+    socket.on('alerta:nueva', handleAlertaNueva);
+    socket.on('alerta:resuelta', handleAlertaResuelta);
 
     return () => {
       disconnectSocket();
     };
   }, []);
 
-  const loadCurrentSurgery = async () => {
-    try {
-      const response = await surgeriesApi.getAll();
-      const surgeryInQuirfano = response.data.find(
-        (s: Surgery) => s.estado === SurgeryStatus.EN_QUIROFANO || s.estado === SurgeryStatus.EN_CURSO
-      );
-      if (surgeryInQuirfano) {
-        setCurrentSurgery(surgeryInQuirfano);
-        joinSurgery(surgeryInQuirfano.id);
-      }
-    } catch (error) {
-      console.error('Error loading current surgery:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleSurgeryEnviada = async (data: any) => {
-    console.log('Cirugía recibida:', data);
-    const surgery = data.surgery;
-    setCurrentSurgery(surgery);
-    joinSurgery(surgery.id);
-    loadAlerts();
+  const handleSurgeryEnviada = (data: any) => {
+    localStorage.setItem('currentSurgeryId', data.surgeryId);
+    loadSurgery();
   };
 
   const handleChecklistActualizado = (data: any) => {
-    console.log('Checklist actualizado:', data);
-    if (currentSurgery?.id === data.surgeryId) {
-      loadSurgeryDetails();
+    if (currentSurgery && data.surgeryId === currentSurgery.id) {
+      loadSurgery();
     }
   };
 
   const handleTiempoRegistrado = (data: any) => {
-    console.log('Tiempo registrado:', data);
-    if (currentSurgery?.id === data.surgeryId) {
-      loadSurgeryDetails();
+    if (currentSurgery && data.surgeryId === currentSurgery.id) {
+      loadSurgery();
     }
   };
 
-  const handleSurgeryEstado = (data: any) => {
-    console.log('Estado cambiado:', data);
-    if (currentSurgery?.id === data.surgeryId) {
-      loadSurgeryDetails();
+  const handleFlujoActualizado = (data: any) => {
+    if (currentSurgery && data.surgeryId === currentSurgery.id) {
+      setFlujo(data);
     }
   };
 
   const handleAlertaNueva = (data: any) => {
-    console.log('Alerta nueva:', data);
-    if (currentSurgery?.id === data.surgeryId) {
-      loadAlerts();
+    if (currentSurgery && data.surgeryId === currentSurgery.id) {
+      loadAlerts(currentSurgery.id);
     }
   };
 
   const handleAlertaResuelta = (data: any) => {
-    console.log('Alerta resuelta:', data);
-    if (currentSurgery?.id === data.surgeryId) {
-      loadAlerts();
+    if (currentSurgery && data.surgeryId === currentSurgery.id) {
+      loadAlerts(currentSurgery.id);
     }
-  };
-
-  const loadSurgeryDetails = async () => {
-    if (!currentSurgery) return;
-    try {
-      const response = await surgeriesApi.getById(currentSurgery.id);
-      setCurrentSurgery(response.data);
-    } catch (error) {
-      console.error('Error loading surgery details:', error);
-    }
-  };
-
-  const loadAlerts = async () => {
-    if (!currentSurgery) return;
-    try {
-      const response = await alertsApi.getBySurgery(currentSurgery.id);
-      setAlerts(response.data);
-    } catch (error) {
-      console.error('Error loading alerts:', error);
-    }
-  };
-
-  const handleResolveAlert = async (alertId: string) => {
-    try {
-      await alertsApi.resolve(alertId, user?.id || '');
-      loadAlerts();
-    } catch (error) {
-      console.error('Error resolving alert:', error);
-      alert('Error al resolver alerta');
-    }
-  };
-
-  const handleVoiceChecklist = (itemText: string) => {
-    if (!currentSurgery) return;
-    const item = currentSurgery.checklist?.find((i) => i.item.toLowerCase().includes(itemText));
-    if (item) {
-      setPendingAction(`Marcar "${item.item}" como completado`);
-      speak(`¿Desea marcar ${item.item} como completado? Diga confirmar o cancelar`);
-    }
-  };
-
-  const handleVoiceTime = (evento: SurgeryEvent) => {
-    if (!currentSurgery) return;
-    setPendingAction(`Registrar evento: ${evento}`);
-    speak(`¿Desea registrar ${evento}? Diga confirmar o cancelar`);
-  };
-
-  const confirmPendingAction = async () => {
-    if (!pendingAction || !currentSurgery) return;
-    // Implementar la acción pendiente
-    setPendingAction(null);
-    speak('Acción confirmada');
-  };
-
-  const cancelPendingAction = () => {
-    setPendingAction(null);
-    speak('Acción cancelada');
   };
 
   const handleChecklistItem = async (itemId: string, completado: boolean) => {
@@ -199,55 +181,203 @@ const Quirofano: React.FC = () => {
         completado_en: new Date().toISOString(),
         via: CompletionVia.MANUAL,
       });
-    } catch (error) {
+      setSuccess('Item del checklist actualizado');
+      setTimeout(() => setSuccess(null), 3000);
+      loadSurgery();
+    } catch (error: any) {
       console.error('Error updating checklist:', error);
+      setError(error.response?.data?.message || 'Error al actualizar checklist');
+      setTimeout(() => setError(null), 5000);
     }
   };
 
-  const handleRegisterTime = async (evento: SurgeryEvent) => {
+  const handleRegisterTime = async (evento: SurgeryEvent, force = false) => {
     if (!currentSurgery) return;
+    
+    if (!force) {
+      setPendingAction(`¿Registrar ${evento}?`);
+      setShowConfirm(true);
+      return;
+    }
+
     try {
       await surgeriesApi.registerTime(currentSurgery.id, {
         evento,
         timestamp: new Date().toISOString(),
         registrado_por: user?.id,
         via: CompletionVia.MANUAL,
+        justificacion: justification || undefined,
       });
 
-      // Actualizar estado según el evento
-      let newStatus = currentSurgery.estado;
-      if (evento === SurgeryEvent.INICIO_CIRUGIA) {
-        newStatus = SurgeryStatus.EN_CURSO;
-      } else if (evento === SurgeryEvent.FIN_CIRUGIA) {
-        newStatus = SurgeryStatus.FINALIZADA;
-      } else if (evento === SurgeryEvent.SALIDA_RECUPERACION) {
-        newStatus = SurgeryStatus.EN_RECUPERACION;
-      }
-
-      if (newStatus !== currentSurgery.estado) {
-        await surgeriesApi.update(currentSurgery.id, { estado: newStatus });
-      }
-    } catch (error) {
+      setSuccess(`Evento "${evento}" registrado exitosamente`);
+      setTimeout(() => setSuccess(null), 3000);
+      setShowConfirm(false);
+      setJustification('');
+      setShowJustification(false);
+      loadSurgery();
+    } catch (error: any) {
       console.error('Error registering time:', error);
+      setError(error.response?.data?.message || 'Error al registrar tiempo');
+      setTimeout(() => setError(null), 5000);
+      setShowConfirm(false);
+      setShowJustification(false);
     }
   };
 
-  const getChecklistByMoment = (momento: ChecklistMoment) => {
-    if (!currentSurgery?.checklist) return [];
-    return currentSurgery.checklist.filter((item) => item.momento === momento);
+  const handleVoiceChecklist = (itemText: string) => {
+    if (!flujo) return;
+    
+    const phaseChecklist = getPhaseChecklist(flujo.currentPhase);
+    const item = phaseChecklist.find((i) => i.item.toLowerCase().includes(itemText));
+    
+    if (item) {
+      handleChecklistItem(item.id, !item.completado);
+    } else {
+      speak('Item no encontrado en esta fase');
+    }
   };
 
-  const getMomentLabel = (momento: ChecklistMoment) => {
-    switch (momento) {
-      case ChecklistMoment.ANTES_ANESTESIA:
-        return 'Antes de la Anestesia';
-      case ChecklistMoment.ANTES_INCISION:
-        return 'Antes de la Incisión';
-      case ChecklistMoment.ANTES_SALIR:
-        return 'Antes de Salir';
+  const handleVoiceRegister = () => {
+    if (!flujo) return;
+    
+    const phaseEvent = getPhaseEvent(flujo.currentPhase);
+    if (phaseEvent) {
+      handleRegisterTime(phaseEvent);
+    } else {
+      speak('No hay evento para registrar en esta fase');
+    }
+  };
+
+  const handleVoiceRepeat = () => {
+    if (!flujo) return;
+    
+    const phaseChecklist = getPhaseChecklist(flujo.currentPhase);
+    const pendientes = phaseChecklist.filter((i) => !i.completado);
+    
+    if (pendientes.length > 0) {
+      const itemsText = pendientes.map((i) => i.item).join(', ');
+      speak(`Pendientes: ${itemsText}`);
+    } else {
+      speak('Todos los items están completos');
+    }
+  };
+
+  const confirmPendingAction = () => {
+    if (pendingAction) {
+      const evento = pendingAction.match(/¿Registrar (.+)\?/)?.[1];
+      if (evento) {
+        handleRegisterTime(evento as SurgeryEvent, true);
+      }
+    }
+  };
+
+  const cancelPendingAction = () => {
+    setPendingAction(null);
+    setShowConfirm(false);
+    setShowJustification(false);
+    setJustification('');
+    speak('Acción cancelada');
+  };
+
+  const handleResolveAlert = async (alertId: string) => {
+    try {
+      await alertsApi.resolve(alertId, user?.id || '');
+      loadAlerts(currentSurgery?.id || '');
+    } catch (error) {
+      console.error('Error resolving alert:', error);
+      alert('Error al resolver alerta');
+    }
+  };
+
+  const getPhaseChecklist = (phase: number) => {
+    if (!flujo) return [];
+    
+    switch (phase) {
+      case 2:
+        return flujo.checklistStatus.antesAnestesia.items;
+      case 3:
+        return flujo.checklistStatus.antesIncision.items;
+      case 4:
+        return flujo.checklistStatus.antesSalir.items;
       default:
-        return momento;
+        return [];
     }
+  };
+
+  const getPhaseEvent = (phase: number): SurgeryEvent | null => {
+    switch (phase) {
+      case 1:
+        return SurgeryEvent.INGRESO_PACIENTE;
+      case 2:
+        return SurgeryEvent.INICIO_ANESTESIA;
+      case 3:
+        return SurgeryEvent.INICIO_CIRUGIA;
+      case 4:
+        return SurgeryEvent.FIN_CIRUGIA;
+      case 5:
+        return SurgeryEvent.SALIDA_RECUPERACION;
+      default:
+        return null;
+    }
+  };
+
+  const isPhaseComplete = (phase: number) => {
+    if (!flujo) return false;
+    
+    switch (phase) {
+      case 1:
+        return flujo.events.some((e) => e.evento === SurgeryEvent.INGRESO_PACIENTE);
+      case 2:
+        return flujo.checklistStatus.antesAnestesia.completado &&
+               flujo.events.some((e) => e.evento === SurgeryEvent.INICIO_ANESTESIA);
+      case 3:
+        return flujo.checklistStatus.antesIncision.completado &&
+               flujo.events.some((e) => e.evento === SurgeryEvent.INICIO_CIRUGIA);
+      case 4:
+        return flujo.checklistStatus.antesSalir.completado &&
+               flujo.events.some((e) => e.evento === SurgeryEvent.FIN_CIRUGIA);
+      case 5:
+        return flujo.events.some((e) => e.evento === SurgeryEvent.SALIDA_RECUPERACION);
+      default:
+        return false;
+    }
+  };
+
+  const canProceedToNext = (phase: number) => {
+    if (!flujo) return false;
+    
+    switch (phase) {
+      case 1:
+        return true; // Fase 1 no requiere checklist
+      case 2:
+        return flujo.checklistStatus.antesAnestesia.completado;
+      case 3:
+        return flujo.checklistStatus.antesIncision.completado;
+      case 4:
+        return flujo.checklistStatus.antesSalir.completado;
+      case 5:
+        return true; // Fase 5 es el resumen final
+      default:
+        return false;
+    }
+  };
+
+  // Cronómetro para fase 3
+  useEffect(() => {
+    if (flujo?.currentPhase === 3 && isPhaseComplete(3)) {
+      const interval = setInterval(() => {
+        setCronometro((prev) => prev + 1);
+      }, 1000);
+      return () => clearInterval(interval);
+    } else {
+      setCronometro(0);
+    }
+  }, [flujo?.currentPhase, flujo?.events]);
+
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
   if (loading) {
@@ -284,6 +414,18 @@ const Quirofano: React.FC = () => {
           </div>
         ) : (
           <div className="space-y-6">
+            {/* Alertas */}
+            {error && (
+              <div className="bg-red-100 border-l-4 border-red-500 p-4 rounded">
+                <p className="font-medium text-red-800">{error}</p>
+              </div>
+            )}
+            {success && (
+              <div className="bg-green-100 border-l-4 border-green-500 p-4 rounded">
+                <p className="font-medium text-green-800">{success}</p>
+              </div>
+            )}
+
             {/* Indicador de voz */}
             <div className="bg-white p-4 rounded-lg shadow flex items-center justify-between">
               <div className="flex items-center gap-4">
@@ -303,132 +445,259 @@ const Quirofano: React.FC = () => {
               </button>
             </div>
 
-            {pendingAction && (
+            {pendingAction && !showJustification && (
               <div className="bg-yellow-100 border-l-4 border-yellow-500 p-4 rounded">
                 <p className="font-medium text-yellow-800">{pendingAction}</p>
-                <p className="text-sm text-yellow-700">Diga "confirmar" o "cancelar"</p>
+                <div className="mt-2 flex gap-2">
+                  <button onClick={confirmPendingAction} className="bg-green-600 text-white px-4 py-2 rounded">
+                    Confirmar
+                  </button>
+                  <button onClick={cancelPendingAction} className="bg-red-600 text-white px-4 py-2 rounded">
+                    Cancelar
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {showJustification && (
+              <div className="bg-yellow-100 border-l-4 border-yellow-500 p-4 rounded">
+                <p className="font-medium text-yellow-800">Faltan items obligatorios. Por favor ingrese una justificación:</p>
+                <textarea
+                  value={justification}
+                  onChange={(e) => setJustification(e.target.value)}
+                  className="w-full mt-2 p-2 border rounded"
+                  rows={3}
+                />
+                <div className="mt-2 flex gap-2">
+                  <button
+                    onClick={() => handleRegisterTime(getPhaseEvent(flujo?.currentPhase || 1)!, true)}
+                    className="bg-green-600 text-white px-4 py-2 rounded"
+                  >
+                    Continuar con justificación
+                  </button>
+                  <button onClick={cancelPendingAction} className="bg-red-600 text-white px-4 py-2 rounded">
+                    Cancelar
+                  </button>
+                </div>
               </div>
             )}
 
             <AlertsPanel alerts={alerts} onResolve={handleResolveAlert} userId={user?.id} />
 
-            {/* Información del paciente */}
-            <div className="bg-white p-6 rounded-lg shadow">
-              <h2 className="text-3xl font-bold mb-4">Paciente: {currentSurgery.patient?.nombre}</h2>
-              <div className="grid grid-cols-2 gap-4 text-xl">
-                <div>
-                  <span className="font-semibold">Procedimiento:</span> {currentSurgery.procedimiento}
-                </div>
-                <div>
-                  <span className="font-semibold">Sitio Quirúrgico:</span> {currentSurgery.sitio_quirurgico}
-                </div>
-                <div>
-                  <span className="font-semibold">Quirofano:</span> {currentSurgery.quirofano}
-                </div>
-                <div>
-                  <span className="font-semibold">Estado:</span> {currentSurgery.estado}
-                </div>
-                {currentSurgery.patient?.alergias && (
-                  <div className="col-span-2 text-red-600 font-semibold">
-                    ⚠️ Alergias: {currentSurgery.patient.alergias}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Registro de tiempos */}
-            <div className="bg-white p-6 rounded-lg shadow">
-              <h3 className="text-2xl font-bold mb-4">Registro de Tiempos</h3>
-              <div className="grid grid-cols-3 gap-4">
-                <button
-                  onClick={() => handleRegisterTime(SurgeryEvent.INGRESO_PACIENTE)}
-                  className="bg-blue-600 text-white p-4 rounded hover:bg-blue-700 text-xl font-semibold"
-                >
-                  Ingreso Paciente
-                </button>
-                <button
-                  onClick={() => handleRegisterTime(SurgeryEvent.INICIO_ANESTESIA)}
-                  className="bg-yellow-600 text-white p-4 rounded hover:bg-yellow-700 text-xl font-semibold"
-                >
-                  Inicio Anestesia
-                </button>
-                <button
-                  onClick={() => handleRegisterTime(SurgeryEvent.INICIO_CIRUGIA)}
-                  className="bg-green-600 text-white p-4 rounded hover:bg-green-700 text-xl font-semibold"
-                >
-                  Inicio Cirugía
-                </button>
-                <button
-                  onClick={() => handleRegisterTime(SurgeryEvent.FIN_CIRUGIA)}
-                  className="bg-red-600 text-white p-4 rounded hover:bg-red-700 text-xl font-semibold"
-                >
-                  Fin Cirugía
-                </button>
-                <button
-                  onClick={() => handleRegisterTime(SurgeryEvent.SALIDA_RECUPERACION)}
-                  className="bg-purple-600 text-white p-4 rounded hover:bg-purple-700 text-xl font-semibold"
-                >
-                  Salida Recuperación
-                </button>
-              </div>
-
-              {currentSurgery.times && currentSurgery.times.length > 0 && (
-                <div className="mt-4">
-                  <h4 className="text-xl font-semibold mb-2">Tiempos Registrados:</h4>
-                  <ul className="list-disc list-inside">
-                    {currentSurgery.times.map((time) => (
-                      <li key={time.id} className="text-lg">
-                        {time.evento} - {new Date(time.timestamp).toLocaleString()} ({time.via})
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </div>
-
-            {/* Checklist */}
-            <div className="bg-white p-6 rounded-lg shadow">
-              <h3 className="text-2xl font-bold mb-4">Checklist de Seguridad</h3>
-              {[ChecklistMoment.ANTES_ANESTESIA, ChecklistMoment.ANTES_INCISION, ChecklistMoment.ANTES_SALIR].map(
-                (momento) => {
-                  const items = getChecklistByMoment(momento);
-                  if (items.length === 0) return null;
-                  return (
-                    <div key={momento} className="mb-6">
-                      <h4 className="text-xl font-semibold mb-3">{getMomentLabel(momento)}</h4>
-                      <div className="space-y-2">
-                        {items.map((item) => (
-                          <div
-                            key={item.id}
-                            className="flex items-center gap-4 p-3 border rounded hover:bg-gray-50"
-                          >
-                            <input
-                              type="checkbox"
-                              checked={item.completado}
-                              onChange={(e) => handleChecklistItem(item.id, e.target.checked)}
-                              className="w-6 h-6"
-                            />
-                            <span className={`text-lg ${item.completado ? 'line-through text-gray-500' : ''}`}>
-                              {item.item}
-                            </span>
-                            {item.completado && (
-                              <span className="text-sm text-gray-500">
-                                ({item.via} - {new Date(item.completado_en || '').toLocaleTimeString()})
-                              </span>
-                            )}
-                          </div>
-                        ))}
+            {/* Barra de progreso */}
+            {flujo && (
+              <div className="bg-white p-6 rounded-lg shadow">
+                <div className="flex justify-between items-center mb-4">
+                  {[1, 2, 3, 4, 5].map((phase) => {
+                    const isCompleted = isPhaseComplete(phase);
+                    const isCurrent = flujo.currentPhase === phase;
+                    const isBlocked = phase > flujo.currentPhase;
+                    
+                    return (
+                      <div
+                        key={phase}
+                        className={`flex-1 text-center p-3 rounded ${
+                          isCompleted ? 'bg-green-100' : isCurrent ? 'bg-blue-100' : isBlocked ? 'bg-gray-100' : 'bg-white'
+                        }`}
+                      >
+                        <div className="font-semibold">Fase {phase}</div>
+                        <div className="text-sm">
+                          {isCompleted ? '✓ Completada' : isCurrent ? '→ Actual' : isBlocked ? '🔒 Bloqueada' : ''}
+                        </div>
                       </div>
-                    </div>
-                  );
-                }
-              )}
-            </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Contenido de la fase actual */}
+            {flujo && (
+              <div className="bg-white p-6 rounded-lg shadow">
+                {flujo.currentPhase === 1 && <Phase1 surgery={currentSurgery} flujo={flujo} onRegister={handleRegisterTime} />}
+                {flujo.currentPhase === 2 && <Phase2 flujo={flujo} onChecklist={handleChecklistItem} onRegister={handleRegisterTime} />}
+                {flujo.currentPhase === 3 && <Phase3 flujo={flujo} onChecklist={handleChecklistItem} onRegister={handleRegisterTime} cronometro={cronometro} formatTime={formatTime} />}
+                {flujo.currentPhase === 4 && <Phase4 flujo={flujo} onChecklist={handleChecklistItem} onRegister={handleRegisterTime} />}
+                {flujo.currentPhase === 5 && <Phase5 flujo={flujo} onRegister={handleRegisterTime} />}
+              </div>
+            )}
           </div>
         )}
       </main>
     </div>
   );
+};
+
+// Componentes de fase
+const Phase1: React.FC<{ surgery: Surgery; flujo: FlujoResponse; onRegister: (e: SurgeryEvent) => void }> = ({ surgery, flujo, onRegister }) => (
+  <div>
+    <h2 className="text-3xl font-bold mb-6">Fase 1: Ingreso del Paciente</h2>
+    <div className="space-y-4 mb-6">
+      <div className="p-4 bg-gray-50 rounded">
+        <p><strong>Paciente:</strong> {surgery.patient?.nombre}</p>
+        <p><strong>Documento:</strong> {surgery.patient?.documento}</p>
+        <p><strong>Sitio Quirúrgico:</strong> {surgery.sitio_quirurgico}</p>
+        <p><strong>Alergias:</strong> {surgery.patient?.alergias}</p>
+        <p><strong>Procedimiento:</strong> {surgery.procedimiento}</p>
+      </div>
+      <div className="p-4 bg-gray-50 rounded">
+        <p className="font-semibold mb-2">Equipo Quirúrgico:</p>
+        {surgery.team?.map((member) => (
+          <p key={member.id}>{member.rol_quirurgico}: {member.nombre}</p>
+        ))}
+      </div>
+    </div>
+    <button
+      onClick={() => onRegister(SurgeryEvent.INGRESO_PACIENTE)}
+      disabled={isPhaseComplete(1, flujo)}
+      className="bg-blue-600 text-white px-8 py-4 rounded text-xl font-semibold disabled:bg-gray-400"
+    >
+      Registrar Ingreso del Paciente
+    </button>
+  </div>
+);
+
+const Phase2: React.FC<{ flujo: FlujoResponse; onChecklist: (id: string, v: boolean) => void; onRegister: (e: SurgeryEvent) => void }> = ({ flujo, onChecklist, onRegister }) => (
+  <div>
+    <h2 className="text-3xl font-bold mb-6">Fase 2: Inicio de Anestesia</h2>
+    <div className="space-y-2 mb-6">
+      {flujo.checklistStatus.antesAnestesia.items.map((item) => (
+        <div key={item.id} className="flex items-center gap-4 p-3 border rounded">
+          <input
+            type="checkbox"
+            checked={item.completado}
+            onChange={(e) => onChecklist(item.id, e.target.checked)}
+            className="w-6 h-6"
+            disabled={isPhaseComplete(2, flujo)}
+          />
+          <span className="text-lg">{item.item}</span>
+        </div>
+      ))}
+    </div>
+    <button
+      onClick={() => onRegister(SurgeryEvent.INICIO_ANESTESIA)}
+      disabled={!flujo.checklistStatus.antesAnestesia.completado || isPhaseComplete(2, flujo)}
+      className="bg-yellow-600 text-white px-8 py-4 rounded text-xl font-semibold disabled:bg-gray-400"
+    >
+      Registrar Inicio de Anestesia
+    </button>
+    {!flujo.checklistStatus.antesAnestesia.completado && (
+      <p className="text-red-600 mt-2">Complete todos los items del checklist antes de continuar</p>
+    )}
+  </div>
+);
+
+const Phase3: React.FC<{ flujo: FlujoResponse; onChecklist: (id: string, v: boolean) => void; onRegister: (e: SurgeryEvent) => void; cronometro: number; formatTime: (s: number) => string }> = ({ flujo, onChecklist, onRegister, cronometro, formatTime }) => (
+  <div>
+    <h2 className="text-3xl font-bold mb-6">Fase 3: Inicio de Cirugía</h2>
+    {isPhaseComplete(3, flujo) && (
+      <div className="mb-4 p-4 bg-green-100 rounded text-center">
+        <p className="text-2xl font-bold">Duración: {formatTime(cronometro)}</p>
+      </div>
+    )}
+    <div className="space-y-2 mb-6">
+      {flujo.checklistStatus.antesIncision.items.map((item) => (
+        <div key={item.id} className="flex items-center gap-4 p-3 border rounded">
+          <input
+            type="checkbox"
+            checked={item.completado}
+            onChange={(e) => onChecklist(item.id, e.target.checked)}
+            className="w-6 h-6"
+            disabled={isPhaseComplete(3, flujo)}
+          />
+          <span className="text-lg">{item.item}</span>
+        </div>
+      ))}
+    </div>
+    <button
+      onClick={() => onRegister(SurgeryEvent.INICIO_CIRUGIA)}
+      disabled={!flujo.checklistStatus.antesIncision.completado || isPhaseComplete(3, flujo)}
+      className="bg-green-600 text-white px-8 py-4 rounded text-xl font-semibold disabled:bg-gray-400"
+    >
+      Registrar Inicio de Cirugía
+    </button>
+    {!flujo.checklistStatus.antesIncision.completado && (
+      <p className="text-red-600 mt-2">Complete todos los items del checklist antes de continuar</p>
+    )}
+  </div>
+);
+
+const Phase4: React.FC<{ flujo: FlujoResponse; onChecklist: (id: string, v: boolean) => void; onRegister: (e: SurgeryEvent) => void }> = ({ flujo, onChecklist, onRegister }) => (
+  <div>
+    <h2 className="text-3xl font-bold mb-6">Fase 4: Fin de Cirugía</h2>
+    <div className="space-y-2 mb-6">
+      {flujo.checklistStatus.antesSalir.items.map((item) => (
+        <div key={item.id} className="flex items-center gap-4 p-3 border rounded">
+          <input
+            type="checkbox"
+            checked={item.completado}
+            onChange={(e) => onChecklist(item.id, e.target.checked)}
+            className="w-6 h-6"
+            disabled={isPhaseComplete(4, flujo)}
+          />
+          <span className="text-lg">{item.item}</span>
+        </div>
+      ))}
+    </div>
+    <button
+      onClick={() => onRegister(SurgeryEvent.FIN_CIRUGIA)}
+      disabled={!flujo.checklistStatus.antesSalir.completado || isPhaseComplete(4, flujo)}
+      className="bg-red-600 text-white px-8 py-4 rounded text-xl font-semibold disabled:bg-gray-400"
+    >
+      Registrar Fin de Cirugía
+    </button>
+    {!flujo.checklistStatus.antesSalir.completado && (
+      <p className="text-red-600 mt-2">Complete todos los items del checklist antes de continuar</p>
+    )}
+  </div>
+);
+
+const Phase5: React.FC<{ flujo: FlujoResponse; onRegister: (e: SurgeryEvent) => void }> = ({ flujo, onRegister }) => (
+  <div>
+    <h2 className="text-3xl font-bold mb-6">Fase 5: Salida a Recuperación</h2>
+    <div className="space-y-4 mb-6">
+      <div className="p-4 bg-gray-50 rounded">
+        <h3 className="font-semibold mb-2">Eventos Registrados:</h3>
+        {flujo.events.map((event) => (
+          <p key={event.id}>{event.evento}: {new Date(event.timestamp).toLocaleString()}</p>
+        ))}
+      </div>
+      <div className="p-4 bg-gray-50 rounded">
+        <h3 className="font-semibold mb-2">Estado del Checklist:</h3>
+        <p>Antes de Anestesia: {flujo.checklistStatus.antesAnestesia.completado ? '✓ Completo' : '✗ Incompleto'}</p>
+        <p>Antes de Incisión: {flujo.checklistStatus.antesIncision.completado ? '✓ Completo' : '✗ Incompleto'}</p>
+        <p>Antes de Salir: {flujo.checklistStatus.antesSalir.completado ? '✓ Completo' : '✗ Incompleto'}</p>
+      </div>
+    </div>
+    <button
+      onClick={() => onRegister(SurgeryEvent.SALIDA_RECUPERACION)}
+      disabled={isPhaseComplete(5, flujo)}
+      className="bg-purple-600 text-white px-8 py-4 rounded text-xl font-semibold disabled:bg-gray-400"
+    >
+      Registrar Salida a Recuperación
+    </button>
+  </div>
+);
+
+// Función auxiliar
+const isPhaseComplete = (phase: number, flujo: FlujoResponse) => {
+  switch (phase) {
+    case 1:
+      return flujo.events.some((e) => e.evento === SurgeryEvent.INGRESO_PACIENTE);
+    case 2:
+      return flujo.checklistStatus.antesAnestesia.completado &&
+             flujo.events.some((e) => e.evento === SurgeryEvent.INICIO_ANESTESIA);
+    case 3:
+      return flujo.checklistStatus.antesIncision.completado &&
+             flujo.events.some((e) => e.evento === SurgeryEvent.INICIO_CIRUGIA);
+    case 4:
+      return flujo.checklistStatus.antesSalir.completado &&
+             flujo.events.some((e) => e.evento === SurgeryEvent.FIN_CIRUGIA);
+    case 5:
+      return flujo.events.some((e) => e.evento === SurgeryEvent.SALIDA_RECUPERACION);
+    default:
+      return false;
+  }
 };
 
 export default Quirofano;

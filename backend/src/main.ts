@@ -5,6 +5,7 @@ import { AppModule } from './app.module';
 import { DataSource } from 'typeorm';
 import { seed } from './database/seed';
 import { seedHistoricalData } from './database/seed-historical';
+import { migrateChecklistItems } from './database/migrate-checklist';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -41,6 +42,10 @@ async function bootstrap() {
     console.log('Generando datos históricos...');
     await seedHistoricalData(dataSource);
   }
+  
+  // Migración de checklist items para cirugías que no tienen
+  console.log('Verificando migración de checklist items...');
+  await migrateChecklistItems(dataSource);
 
   const port = process.env.PORT || 3000;
   await app.listen(port);

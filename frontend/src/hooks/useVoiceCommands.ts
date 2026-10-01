@@ -3,6 +3,8 @@ import { useState, useEffect, useCallback } from 'react';
 interface VoiceCommand {
   command: string;
   action: () => void;
+  validate?: () => boolean; // Validación opcional
+  invalidMessage?: string; // Mensaje si la validación falla
 }
 
 interface UseVoiceCommandsReturn {
@@ -42,6 +44,15 @@ export const useVoiceCommands = (commands: VoiceCommand[]): UseVoiceCommandsRetu
       );
 
       if (matchedCommand) {
+        // Validar si el comando es válido para la fase actual
+        if (matchedCommand.validate && !matchedCommand.validate()) {
+          setLastCommand(matchedCommand.command);
+          const msg = matchedCommand.invalidMessage || 'Ese comando no aplica en esta fase';
+          setError(msg);
+          setTimeout(() => setError(null), 3000);
+          return;
+        }
+
         setLastCommand(matchedCommand.command);
         matchedCommand.action();
       } else {

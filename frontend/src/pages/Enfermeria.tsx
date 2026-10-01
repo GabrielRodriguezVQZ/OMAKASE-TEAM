@@ -12,6 +12,7 @@ const Enfermeria: React.FC = () => {
   const [showNewForm, setShowNewForm] = useState(false);
   const [loading, setLoading] = useState(true);
   const [alerts, setAlerts] = useState<Alert[]>([]);
+  const [flujo, setFlujo] = useState<any>(null);
 
   // Form state
   const [patientData, setPatientData] = useState({
@@ -51,6 +52,7 @@ const Enfermeria: React.FC = () => {
       socket.on('surgery:estado', handleSurgeryEstado);
       socket.on('alerta:nueva', handleAlertaNueva);
       socket.on('alerta:resuelta', handleAlertaResuelta);
+      socket.on('flujo:actualizado', handleFlujoActualizado);
     }
 
     return () => {
@@ -110,13 +112,30 @@ const Enfermeria: React.FC = () => {
     }
   };
 
+  const handleFlujoActualizado = (data: any) => {
+    console.log('Flujo actualizado:', data);
+    if (selectedSurgery?.id === data.surgeryId) {
+      setFlujo(data);
+    }
+  };
+
   const loadSurgeryDetails = async (surgeryId: string) => {
     try {
       const response = await surgeriesApi.getById(surgeryId);
       setSelectedSurgery(response.data);
       loadAlerts(surgeryId);
+      loadFlujo(surgeryId);
     } catch (error) {
       console.error('Error loading surgery details:', error);
+    }
+  };
+
+  const loadFlujo = async (surgeryId: string) => {
+    try {
+      const response = await surgeriesApi.getFlujo(surgeryId);
+      setFlujo(response.data);
+    } catch (error) {
+      console.error('Error loading flujo:', error);
     }
   };
 
@@ -500,6 +519,25 @@ const Enfermeria: React.FC = () => {
                   {selectedSurgery.estado}
                 </span>
               </div>
+
+              {flujo && selectedSurgery.estado !== SurgeryStatus.PREPARADA && (
+                <div>
+                  <h3 className="font-semibold">Fase Actual</h3>
+                  <p className="text-lg">Fase {flujo.currentPhase} de 5</p>
+                  <div className="mt-2 space-y-1">
+                    {flujo.events.map((event: any) => (
+                      <p key={event.id} className="text-sm text-gray-600">
+                        {event.evento}: {new Date(event.timestamp).toLocaleTimeString()}
+                      </p>
+                    ))}
+                  </div>
+                  <div className="mt-2 text-sm">
+                    <p>Checklist Antes Anestesia: {flujo.checklistStatus.antesAnestesia.completado ? '✓' : '✗'}</p>
+                    <p>Checklist Antes Incisión: {flujo.checklistStatus.antesIncision.completado ? '✓' : '✗'}</p>
+                    <p>Checklist Antes Salir: {flujo.checklistStatus.antesSalir.completado ? '✓' : '✗'}</p>
+                  </div>
+                </div>
+              )}
 
               {selectedSurgery.estado === SurgeryStatus.PREPARADA && (
                 <button

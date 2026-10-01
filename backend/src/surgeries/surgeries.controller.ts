@@ -115,4 +115,12 @@ export class SurgeriesController {
   sendToQuirfano(@Param('id') id: string) {
     return this.surgeriesService.sendToQuirfano(id);
   }
+
+  @Get(':id/flujo')
+  @Roles(UserRole.QUIROFANO, UserRole.ADMIN)
+  @ApiOperation({ summary: 'Obtener flujo de una cirugía' })
+  @ApiResponse({ status: 200, description: 'Flujo de la cirugía' })
+  getFlujo(@Param('id') id: string) {
+    return this.surgeriesService.getFlujo(id);
+  }
 }

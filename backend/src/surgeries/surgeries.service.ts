@@ -146,23 +146,74 @@ export class SurgeriesService {
   }
 
   async registerTime(surgeryId: string, timeDto: any) {
-    // Validar que el checklist correspondiente esté completo antes de avanzar
     const surgery = await this.surgeriesRepository.findOne({
       where: { id: surgeryId },
-      relations: ['checklist'],
+      relations: ['checklist', 'times'],
     });
 
     if (!surgery) {
       throw new NotFoundException('Cirugía no encontrada');
     }
 
-    // Bloqueo: No permitir INICIO_CIRUGIA si checklist ANTES_INCISION no está completo
+    // Definir orden de eventos
+    const eventOrder = [
+      SurgeryEvent.INGRESO_PACIENTE,
+      SurgeryEvent.INICIO_ANESTESIA,
+      SurgeryEvent.INICIO_CIRUGIA,
+      SurgeryEvent.FIN_CIRUGIA,
+      SurgeryEvent.SALIDA_RECUPERACION,
+    ];
+
+    // Validar orden de eventos
+    const registeredEvents = surgery.times || [];
+    const eventIndex = eventOrder.indexOf(timeDto.evento);
+    
+    if (registeredEvents.length > 0) {
+      const lastEvent = registeredEvents[registeredEvents.length - 1].evento;
+      const lastEventIndex = eventOrder.indexOf(lastEvent);
+      
+      if (eventIndex !== lastEventIndex + 1) {
+        throw new Error(
+          `Orden de eventos incorrecto. Se esperaba: ${eventOrder[lastEventIndex + 1]}, recibido: ${timeDto.evento}`
+        );
+      }
+    } else if (eventIndex !== 0) {
+      throw new Error(
+        `El primer evento debe ser ${eventOrder[0]}, recibido: ${timeDto.evento}`
+      );
+    }
+
+    // Validar checklist según la fase
+    if (timeDto.evento === SurgeryEvent.INICIO_ANESTESIA) {
+      const checklistAntesAnestesia = surgery.checklist?.filter(
+        (item) => item.momento === ChecklistMoment.ANTES_ANESTESIA && !item.completado
+      );
+      if (checklistAntesAnestesia && checklistAntesAnestesia.length > 0) {
+        throw new Error(
+          'No se puede iniciar la anestesia. Faltan items del checklist antes de la anestesia.'
+        );
+      }
+    }
+
     if (timeDto.evento === SurgeryEvent.INICIO_CIRUGIA) {
       const checklistAntesIncision = surgery.checklist?.filter(
         (item) => item.momento === ChecklistMoment.ANTES_INCISION && !item.completado
       );
       if (checklistAntesIncision && checklistAntesIncision.length > 0) {
-        throw new Error('No se puede iniciar la cirugía. Faltan items del checklist antes de la incisión.');
+        throw new Error(
+          'No se puede iniciar la cirugía. Faltan items del checklist antes de la incisión.'
+        );
+      }
+    }
+
+    if (timeDto.evento === SurgeryEvent.FIN_CIRUGIA) {
+      const checklistAntesSalir = surgery.checklist?.filter(
+        (item) => item.momento === ChecklistMoment.ANTES_SALIR && !item.completado
+      );
+      if (checklistAntesSalir && checklistAntesSalir.length > 0) {
+        throw new Error(
+          'No se puede finalizar la cirugía. Faltan items del checklist antes de salir.'
+        );
       }
     }
 
@@ -171,6 +222,29 @@ export class SurgeriesService {
       ...timeDto,
     });
     const saved = await this.surgeryTimeRepository.save(time);
+    
+    // Actualizar estado de la cirugía según el evento
+    let newStatus = surgery.estado;
+    if (timeDto.evento === SurgeryEvent.INGRESO_PACIENTE) {
+      newStatus = SurgeryStatus.EN_QUIROFANO;
+    } else if (timeDto.evento === SurgeryEvent.INICIO_CIRUGIA) {
+      newStatus = SurgeryStatus.EN_CURSO;
+    } else if (timeDto.evento === SurgeryEvent.FIN_CIRUGIA) {
+      newStatus = SurgeryStatus.FINALIZADA;
+    } else if (timeDto.evento === SurgeryEvent.SALIDA_RECUPERACION) {
+      newStatus = SurgeryStatus.EN_RECUPERACION;
+    }
+
+    if (newStatus !== surgery.estado) {
+      this.surgeriesRepository.merge(surgery, { estado: newStatus });
+      await this.surgeriesRepository.save(surgery);
+      
+      // Emitir evento de cambio de estado
+      this.gateway.server.emit('surgery:estado', {
+        surgeryId: surgery.id,
+        estado: newStatus,
+      });
+    }
     
     // Log de auditoría
     await this.auditService.logAction(
@@ -186,6 +260,10 @@ export class SurgeriesService {
       time: saved,
     });
     
+    // Emitir evento de flujo actualizado
+    const flujo = await this.getFlujo(surgeryId);
+    this.gateway.server.to(`surgery:${surgeryId}`).emit('flujo:actualizado', flujo);
+    
     // Validar y generar alertas
     await this.alertsService.validateSurgeryData(surgeryId);
     
@@ -197,6 +275,75 @@ export class SurgeriesService {
       where: { surgery_id: surgeryId },
       order: { timestamp: 'ASC' },
     });
+  }
+
+  async getFlujo(surgeryId: string) {
+    const surgery = await this.surgeriesRepository.findOne({
+      where: { id: surgeryId },
+      relations: ['checklist', 'times'],
+    });
+
+    if (!surgery) {
+      throw new NotFoundException('Cirugía no encontrada');
+    }
+
+    // Definir orden de eventos
+    const eventOrder = [
+      SurgeryEvent.INGRESO_PACIENTE,
+      SurgeryEvent.INICIO_ANESTESIA,
+      SurgeryEvent.INICIO_CIRUGIA,
+      SurgeryEvent.FIN_CIRUGIA,
+      SurgeryEvent.SALIDA_RECUPERACION,
+    ];
+
+    // Encontrar la fase actual basada en el último evento registrado
+    const registeredEvents = surgery.times || [];
+    let currentPhase = 1; // Fase 1: Ingreso del paciente
+
+    if (registeredEvents.length > 0) {
+      const lastEvent = registeredEvents[registeredEvents.length - 1].evento;
+      const lastEventIndex = eventOrder.indexOf(lastEvent);
+      currentPhase = lastEventIndex + 2; // Siguiente fase
+      if (currentPhase > 5) currentPhase = 5; // Máximo fase 5
+    }
+
+    // Obtener checklist por momento
+    const checklistAntesAnestesia = surgery.checklist?.filter(
+      (item) => item.momento === ChecklistMoment.ANTES_ANESTESIA
+    ) || [];
+    const checklistAntesIncision = surgery.checklist?.filter(
+      (item) => item.momento === ChecklistMoment.ANTES_INCISION
+    ) || [];
+    const checklistAntesSalir = surgery.checklist?.filter(
+      (item) => item.momento === ChecklistMoment.ANTES_SALIR
+    ) || [];
+
+    // Calcular estado de cada checklist
+    const checklistStatus = {
+      antesAnestesia: {
+        items: checklistAntesAnestesia,
+        completado: checklistAntesAnestesia.every((item) => item.completado),
+        pendientes: checklistAntesAnestesia.filter((item) => !item.completado),
+      },
+      antesIncision: {
+        items: checklistAntesIncision,
+        completado: checklistAntesIncision.every((item) => item.completado),
+        pendientes: checklistAntesIncision.filter((item) => !item.completado),
+      },
+      antesSalir: {
+        items: checklistAntesSalir,
+        completado: checklistAntesSalir.every((item) => item.completado),
+        pendientes: checklistAntesSalir.filter((item) => !item.completado),
+      },
+    };
+
+    return {
+      surgeryId: surgery.id,
+      estado: surgery.estado,
+      currentPhase,
+      events: registeredEvents,
+      checklistStatus,
+    };
   }
 
   async getTrazabilidad(surgeryId: string) {

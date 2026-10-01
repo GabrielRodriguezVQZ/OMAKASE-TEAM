@@ -58,6 +58,7 @@ export const surgeriesApi = {
   getTimes: (id: string) => api.get(`/surgeries/${id}/times`),
   sendToQuirfano: (id: string) => api.post(`/surgeries/${id}/enviar-quirfano`),
   getTrazabilidad: (id: string) => api.get(`/surgeries/${id}/trazabilidad`),
+  getFlujo: (id: string) => api.get(`/surgeries/${id}/flujo`),
 };
 
 export const alertsApi = {
