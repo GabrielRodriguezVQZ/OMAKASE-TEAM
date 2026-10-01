@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Put, Body, Param, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Put, Delete, Body, Param, UseGuards } from '@nestjs/common';
 import { SurgeriesService } from './surgeries.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
@@ -42,6 +42,14 @@ export class SurgeriesController {
   @ApiResponse({ status: 200, description: 'Cirugía actualizada' })
   update(@Param('id') id: string, @Body() updateSurgeryDto: any) {
     return this.surgeriesService.update(id, updateSurgeryDto);
+  }
+
+  @Delete(':id')
+  @Roles(UserRole.ENFERMERIA, UserRole.ADMIN)
+  @ApiOperation({ summary: 'Eliminar una cirugía' })
+  @ApiResponse({ status: 200, description: 'Cirugía eliminada' })
+  remove(@Param('id') id: string) {
+    return this.surgeriesService.remove(id);
   }
 
   @Post(':id/team')
@@ -90,6 +98,14 @@ export class SurgeriesController {
   @ApiResponse({ status: 200, description: 'Tiempos' })
   getTimes(@Param('id') id: string) {
     return this.surgeriesService.getTimes(id);
+  }
+
+  @Get(':id/trazabilidad')
+  @Roles(UserRole.ENFERMERIA, UserRole.QUIROFANO, UserRole.ADMIN)
+  @ApiOperation({ summary: 'Obtener línea de tiempo de trazabilidad' })
+  @ApiResponse({ status: 200, description: 'Línea de tiempo' })
+  async getTrazabilidad(@Param('id') id: string) {
+    return this.surgeriesService.getTrazabilidad(id);
   }
 
   @Post(':id/enviar-quirfano')

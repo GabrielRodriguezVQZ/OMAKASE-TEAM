@@ -1,6 +1,9 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, ManyToOne, JoinColumn } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, ManyToOne, JoinColumn, OneToMany } from 'typeorm';
 import { Patient } from './patient.entity';
 import { User } from './user.entity';
+import { SurgeryTeam } from './surgery-team.entity';
+import { ChecklistItem } from './checklist-item.entity';
+import { SurgeryTime } from './surgery-time.entity';
 
 export enum SurgeryStatus {
   PROGRAMADA = 'PROGRAMADA',
@@ -48,6 +51,15 @@ export class Surgery {
   @ManyToOne(() => User)
   @JoinColumn({ name: 'creada_por' })
   creador: User;
+
+  @OneToMany(() => SurgeryTeam, (team) => team.surgery)
+  team: SurgeryTeam[];
+
+  @OneToMany(() => ChecklistItem, (checklist) => checklist.surgery)
+  checklist: ChecklistItem[];
+
+  @OneToMany(() => SurgeryTime, (time) => time.surgery)
+  times: SurgeryTime[];
 
   @CreateDateColumn()
   creado_en: Date;

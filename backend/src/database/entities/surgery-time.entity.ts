@@ -23,7 +23,7 @@ export class SurgeryTime {
   @Column()
   surgery_id: string;
 
-  @ManyToOne(() => Surgery)
+  @ManyToOne(() => Surgery, (surgery) => surgery.times)
   @JoinColumn({ name: 'surgery_id' })
   surgery: Surgery;
 

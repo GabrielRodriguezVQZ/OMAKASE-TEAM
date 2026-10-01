@@ -147,6 +147,21 @@ const Enfermeria: React.FC = () => {
     }
   };
 
+  const handleDeleteSurgery = async (surgeryId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!confirm('¿Está seguro de eliminar este caso? Esta acción no se puede deshacer.')) {
+      return;
+    }
+    try {
+      await surgeriesApi.delete(surgeryId);
+      alert('Caso eliminado exitosamente');
+      loadSurgeries();
+    } catch (error: any) {
+      console.error('Error deleting surgery:', error);
+      alert(error.response?.data?.message || 'Error al eliminar el caso');
+    }
+  };
+
   const getStatusColor = (status: SurgeryStatus) => {
     switch (status) {
       case SurgeryStatus.PROGRAMADA:
@@ -211,16 +226,26 @@ const Enfermeria: React.FC = () => {
                   }}
                 >
                   <div className="flex justify-between items-start">
-                    <div>
+                    <div className="flex-1">
                       <h3 className="text-lg font-semibold">{surgery.patient?.nombre}</h3>
                       <p className="text-gray-600">{surgery.procedimiento}</p>
                       <p className="text-sm text-gray-500">
                         Quirofano: {surgery.quirofano} | {new Date(surgery.fecha_programada).toLocaleString()}
                       </p>
                     </div>
-                    <span className={`px-3 py-1 rounded-full text-sm ${getStatusColor(surgery.estado)}`}>
-                      {surgery.estado}
-                    </span>
+                    <div className="flex items-center gap-3">
+                      <span className={`px-3 py-1 rounded-full text-sm ${getStatusColor(surgery.estado)}`}>
+                        {surgery.estado}
+                      </span>
+                      {(surgery.estado === SurgeryStatus.PROGRAMADA || surgery.estado === SurgeryStatus.PREPARADA) && (
+                        <button
+                          onClick={(e) => handleDeleteSurgery(surgery.id, e)}
+                          className="bg-red-600 text-white px-3 py-1 rounded hover:bg-red-700 text-sm"
+                        >
+                          Eliminar
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
               ))}

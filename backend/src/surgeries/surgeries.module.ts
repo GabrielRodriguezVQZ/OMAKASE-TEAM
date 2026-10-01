@@ -4,10 +4,14 @@ import { Surgery, SurgeryTeam, ChecklistItem, SurgeryTime, Patient } from '../da
 import { SurgeriesController } from './surgeries.controller';
 import { SurgeriesService } from './surgeries.service';
 import { Gateway } from '../websocket/gateway';
+import { AlertsModule } from '../alerts/alerts.module';
+import { AuditModule } from '../audit/audit.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([Surgery, SurgeryTeam, ChecklistItem, SurgeryTime, Patient]),
+    AlertsModule,
+    AuditModule,
   ],
   controllers: [SurgeriesController],
   providers: [SurgeriesService, Gateway],

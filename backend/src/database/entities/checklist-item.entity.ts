@@ -21,7 +21,7 @@ export class ChecklistItem {
   @Column()
   surgery_id: string;
 
-  @ManyToOne(() => Surgery)
+  @ManyToOne(() => Surgery, (surgery) => surgery.checklist)
   @JoinColumn({ name: 'surgery_id' })
   surgery: Surgery;
 

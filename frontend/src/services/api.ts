@@ -57,6 +57,13 @@ export const surgeriesApi = {
   registerTime: (id: string, data: any) => api.post(`/surgeries/${id}/times`, data),
   getTimes: (id: string) => api.get(`/surgeries/${id}/times`),
   sendToQuirfano: (id: string) => api.post(`/surgeries/${id}/enviar-quirfano`),
+  getTrazabilidad: (id: string) => api.get(`/surgeries/${id}/trazabilidad`),
+};
+
+export const alertsApi = {
+  getBySurgery: (surgeryId: string) => api.get(`/alerts/surgery/${surgeryId}`),
+  validate: (surgeryId: string) => api.post(`/alerts/validate/${surgeryId}`),
+  resolve: (alertId: string, userId: string) => api.post(`/alerts/${alertId}/resolve`, { userId }),
 };
 
 export default api;

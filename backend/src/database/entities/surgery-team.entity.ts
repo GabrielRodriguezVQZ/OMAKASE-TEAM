@@ -18,7 +18,7 @@ export class SurgeryTeam {
   @Column()
   surgery_id: string;
 
-  @ManyToOne(() => Surgery)
+  @ManyToOne(() => Surgery, (surgery) => surgery.team)
   @JoinColumn({ name: 'surgery_id' })
   surgery: Surgery;
 
