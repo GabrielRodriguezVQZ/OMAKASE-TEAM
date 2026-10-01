@@ -3,6 +3,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { connectSocket, disconnectSocket, joinSurgery, leaveSurgery } from '../services/socket';
 import { surgeriesApi, patientsApi, alertsApi } from '../services/api';
 import { Surgery, Patient, SurgeryStatus, SurgicalRole, Alert, AlertSeverity } from '../types';
+import AlertsPanel from '../components/AlertsPanel';
 
 const Enfermeria: React.FC = () => {
   const { user, logout } = useAuth();
@@ -171,6 +172,16 @@ const Enfermeria: React.FC = () => {
     } catch (error) {
       console.error('Error sending to quirfano:', error);
       alert('Error al enviar a quirófano');
+    }
+  };
+
+  const handleResolveAlert = async (alertId: string) => {
+    try {
+      await alertsApi.resolve(alertId, user?.id || '');
+      loadAlerts(selectedSurgery?.id || '');
+    } catch (error) {
+      console.error('Error resolving alert:', error);
+      alert('Error al resolver alerta');
     }
   };
 
@@ -462,6 +473,8 @@ const Enfermeria: React.FC = () => {
                 Volver
               </button>
             </div>
+
+            <AlertsPanel alerts={alerts} onResolve={handleResolveAlert} userId={user?.id} />
 
             <div className="space-y-4">
               <div>

@@ -1,13 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { connectSocket, disconnectSocket, joinSurgery, leaveSurgery } from '../services/socket';
-import { surgeriesApi } from '../services/api';
-import { Surgery, SurgeryStatus, ChecklistMoment, SurgeryEvent, CompletionVia } from '../types';
+import { surgeriesApi, alertsApi } from '../services/api';
+import { Surgery, SurgeryStatus, ChecklistMoment, SurgeryEvent, CompletionVia, Alert } from '../types';
+import AlertsPanel from '../components/AlertsPanel';
 
 const Quirofano: React.FC = () => {
   const { user, logout } = useAuth();
   const [currentSurgery, setCurrentSurgery] = useState<Surgery | null>(null);
   const [loading, setLoading] = useState(true);
+  const [alerts, setAlerts] = useState<Alert[]>([]);
 
   useEffect(() => {
     connectSocket(localStorage.getItem('token') || '');
@@ -18,6 +20,8 @@ const Quirofano: React.FC = () => {
       socket.on('checklist:actualizado', handleChecklistActualizado);
       socket.on('tiempo:registrado', handleTiempoRegistrado);
       socket.on('surgery:estado', handleSurgeryEstado);
+      socket.on('alerta:nueva', handleAlertaNueva);
+      socket.on('alerta:resuelta', handleAlertaResuelta);
     }
 
     // Buscar cirugía en quirófano
@@ -50,6 +54,7 @@ const Quirofano: React.FC = () => {
     const surgery = data.surgery;
     setCurrentSurgery(surgery);
     joinSurgery(surgery.id);
+    loadAlerts();
   };
 
   const handleChecklistActualizado = (data: any) => {
@@ -73,6 +78,20 @@ const Quirofano: React.FC = () => {
     }
   };
 
+  const handleAlertaNueva = (data: any) => {
+    console.log('Alerta nueva:', data);
+    if (currentSurgery?.id === data.surgeryId) {
+      loadAlerts();
+    }
+  };
+
+  const handleAlertaResuelta = (data: any) => {
+    console.log('Alerta resuelta:', data);
+    if (currentSurgery?.id === data.surgeryId) {
+      loadAlerts();
+    }
+  };
+
   const loadSurgeryDetails = async () => {
     if (!currentSurgery) return;
     try {
@@ -80,6 +99,26 @@ const Quirofano: React.FC = () => {
       setCurrentSurgery(response.data);
     } catch (error) {
       console.error('Error loading surgery details:', error);
+    }
+  };
+
+  const loadAlerts = async () => {
+    if (!currentSurgery) return;
+    try {
+      const response = await alertsApi.getBySurgery(currentSurgery.id);
+      setAlerts(response.data);
+    } catch (error) {
+      console.error('Error loading alerts:', error);
+    }
+  };
+
+  const handleResolveAlert = async (alertId: string) => {
+    try {
+      await alertsApi.resolve(alertId, user?.id || '');
+      loadAlerts();
+    } catch (error) {
+      console.error('Error resolving alert:', error);
+      alert('Error al resolver alerta');
     }
   };
 
@@ -177,6 +216,8 @@ const Quirofano: React.FC = () => {
           </div>
         ) : (
           <div className="space-y-6">
+            <AlertsPanel alerts={alerts} onResolve={handleResolveAlert} userId={user?.id} />
+
             {/* Información del paciente */}
             <div className="bg-white p-6 rounded-lg shadow">
               <h2 className="text-3xl font-bold mb-4">Paciente: {currentSurgery.patient?.nombre}</h2>

@@ -37,9 +37,9 @@ docker compose up --build
 ```
 
 4. Acceder a la aplicación:
-   - Frontend: http://localhost:5173
-   - Backend API: http://localhost:3000
-   - Analytics: http://localhost:8000
+   - Frontend: http://localhost:5174
+   - Backend API: http://localhost:3001
+   - Analytics: http://localhost:8001
 
 ## 👥 Usuarios de Prueba
 
